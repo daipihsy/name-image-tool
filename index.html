@@ -192,8 +192,8 @@ function drawOrder(order, label, name, family) {
 
   // 二维码：只含订单号
   const qr = qrcode(0, 'M'); qr.addData(order); qr.make();
-  const n = qr.getModuleCount(), cell = Math.floor(280 / n), qs = cell * n;
-  const blockW = 340, blockX = W - pad - blockW;
+  const n = qr.getModuleCount(), cell = Math.floor(220 / n), qs = cell * n;
+  const blockW = 280, blockX = W - pad - blockW;
   const qx = blockX + Math.round((blockW - qs) / 2), qy = pad + 10;
   ctx.fillStyle = '#000';
   for (let r = 0; r < n; r++) for (let col = 0; col < n; col++)
@@ -202,18 +202,18 @@ function drawOrder(order, label, name, family) {
   // 二维码下面：订单编号（粗）+ 名字
   ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#000';
   let y = qy + qs + 18;
-  let fs = 40; ctx.font = `bold ${fs}px ${LABEL_FONT}`;
-  while (ctx.measureText(label).width > blockW && fs > 20) { fs--; ctx.font = `bold ${fs}px ${LABEL_FONT}`; }
-  ctx.fillText(label, blockX + blockW / 2, y); y += fs + 12;
-  ctx.font = `bold 34px ${LABEL_FONT}`;
-  for (const ln of wrapLines(ctx, name, blockW).slice(0, 4)) { ctx.fillText(ln, blockX + blockW / 2, y); y += 44; }
+  let fs = 34; ctx.font = `bold ${fs}px ${LABEL_FONT}`;
+  while (ctx.measureText(label).width > blockW && fs > 18) { fs--; ctx.font = `bold ${fs}px ${LABEL_FONT}`; }
+  ctx.fillText(label, blockX + blockW / 2, y); y += fs + 10;
+  ctx.font = `bold 28px ${LABEL_FONT}`;
+  for (const ln of wrapLines(ctx, name, blockW).slice(0, 4)) { ctx.fillText(ln, blockX + blockW / 2, y); y += 36; }
 
   // 左边大字名字：自动缩放填满区域
-  const ax = pad, ay = pad, aw = blockX - 40 - pad, ah = H - pad * 2;
+  const ax = pad, ay = pad, aw = blockX - 24 - pad, ah = H - pad * 2;
   ctx.font = `100px "${family}"`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   const mt = ctx.measureText(name);
   const L = mt.actualBoundingBoxLeft, R = mt.actualBoundingBoxRight, A = mt.actualBoundingBoxAscent, D = mt.actualBoundingBoxDescent;
-  const s = Math.min(aw / (L + R), ah / (A + D), 3.2);
+  const s = Math.min(aw / (L + R), ah / (A + D), 4);
   const fsz = 100 * s;
   ctx.font = `${fsz}px "${family}"`; ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   const tw = (L + R) * s, th = (A + D) * s;
