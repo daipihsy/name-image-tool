@@ -58,8 +58,8 @@
     <div class="panel" style="margin-top:16px">
       <div class="row" style="margin-top:0">
         模式 <select id="mode">
+          <option value="order" selected>订单号 + 名字（4:3 带二维码）</option>
           <option value="plain">只出名字</option>
-          <option value="order">订单号 + 名字（4:3 带二维码）</option>
         </select>
       </div>
       <div class="pair">
@@ -327,9 +327,9 @@ drop.addEventListener('drop', e => { e.preventDefault(); $('drop').classList.rem
 
 // 设置也记住
 const keys = ['size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts', 'names', 'pasteH', 'withName', 'mode', 'orders'];
-try { const s = JSON.parse(localStorage.getItem('settings') || '{}'); for (const k of keys) if (k in s) { const el = $(k); el.type === 'checkbox' ? el.checked = s[k] : el.value = s[k]; } } catch {}
+try { const s = JSON.parse(localStorage.getItem('settings') || '{}'); if (s.v !== 2) delete s.mode; for (const k of keys) if (k in s) { const el = $(k); el.type === 'checkbox' ? el.checked = s[k] : el.value = s[k]; } } catch {}
 updateTip();
-document.addEventListener('input', () => { try { const s = {}; for (const k of keys) { const el = $(k); s[k] = el.type === 'checkbox' ? el.checked : el.value; } localStorage.setItem('settings', JSON.stringify(s)); } catch {} });
+document.addEventListener('input', () => { try { const s = { v: 2 }; for (const k of keys) { const el = $(k); s[k] = el.type === 'checkbox' ? el.checked : el.value; } localStorage.setItem('settings', JSON.stringify(s)); } catch {} });
 
 (async () => {
   try {
