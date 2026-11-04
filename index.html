@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>名字出图</title>
+<style>
+  :root { --bg:#f4f4f2; --card:#fff; --line:#ddd; --text:#222; --muted:#888; --accent:#2f6fde; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Microsoft YaHei", system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:14px 20px; background:#fff; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0 12px 0 0; }
+  button, select, input[type=number] { font:inherit; padding:6px 12px; border:1px solid #ccc; border-radius:6px; background:#fff; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  main { display:grid; grid-template-columns: 320px 1fr; gap:16px; padding:16px 20px; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .panel h2 { font-size:14px; margin:0 0 8px; color:#555; }
+  textarea { width:100%; min-height:220px; font-family:inherit; font-size:16px; line-height:1.6; padding:8px; border:1px solid #ccc; border-radius:6px; resize:vertical; }
+  .fontlist { list-style:none; margin:0; padding:0; max-height:260px; overflow:auto; }
+  .fontlist li { display:flex; align-items:center; gap:6px; padding:5px 6px; border-radius:6px; cursor:pointer; }
+  .fontlist li:hover { background:#f2f5fb; }
+  .fontlist li.active { background:#e3ecfc; }
+  .fontlist li .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+  .fontlist li .del { border:none; background:none; color:#c33; padding:0 4px; }
+  .row { display:flex; gap:8px; align-items:center; margin:8px 0; font-size:13px; flex-wrap:wrap; }
+  .row input[type=number] { width:80px; padding:4px 6px; }
+  .grid { display:flex; flex-wrap:wrap; gap:14px; align-content:flex-start; }
+  .item { background:#fff; border:1px solid var(--line); border-radius:8px; padding:6px; cursor:pointer; position:relative; transition: box-shadow .15s; }
+  .item:hover { box-shadow:0 2px 10px rgba(0,0,0,.12); border-color:var(--accent); }
+  .item canvas { display:block; max-width:360px; height:auto; }
+  .item .cap { font-size:12px; color:var(--muted); text-align:center; margin-top:4px; }
+  .item.ok::after { content:"已复制 ✓"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(47,111,222,.85); color:#fff; font-size:18px; border-radius:8px; }
+  .empty { color:var(--muted); padding:30px; }
+  .tip { font-size:12px; color:var(--muted); }
+  #drop.drag { outline:2px dashed var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>名字出图</h1>
+  <button class="primary" id="btnImport">导入字体</button>
+  <input type="file" id="fileInput" accept=".ttf,.otf,.woff,.woff2" multiple hidden>
+  <label class="tip"><input type="checkbox" id="allFonts"> 每个名字用全部字体各出一张</label>
+  <span class="tip">点击图片即复制，到表格里 Ctrl+V 粘贴</span>
+</header>
+<main>
+  <div>
+    <div class="panel" id="drop">
+      <h2>字体（可再导入/拖入别的字体，导入后自动记住）</h2>
+      <ul class="fontlist" id="fontList"></ul>
+      <div class="empty" id="noFont" style="padding:10px">默认字体加载中…</div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <h2>名字（一行一个）</h2>
+      <textarea id="names" placeholder="Kennedy">Kennedy</textarea>
+      <div class="row">
+        字号 <input type="number" id="size" value="120" min="20" max="600">
+        留白 <input type="number" id="pad" value="40" min="0" max="400">
+      </div>
+      <div class="row">
+        文字色 <input type="color" id="color" value="#222222">
+        <label><input type="checkbox" id="fixed"> 固定画布</label>
+        <input type="number" id="fw" value="600" min="50"> × <input type="number" id="fh" value="300" min="50">
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="grid" id="out"></div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const S = { fonts: [], active: null };   // fonts: {id, name, family, data}
+
+// ---------- IndexedDB 记住字体 ----------
+const dbp = new Promise((res, rej) => {
+  const r = indexedDB.open('name-image-tool', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('fonts', { keyPath: 'id' });
+  r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+});
+async function dbAll() { try { const db = await dbp; return await new Promise(r => { const q = db.transaction('fonts').objectStore('fonts').getAll(); q.onsuccess = () => r(q.result || []); q.onerror = () => r([]); }); } catch { return []; } }
+async function dbPut(v) { try { const db = await dbp; db.transaction('fonts', 'readwrite').objectStore('fonts').put(v); } catch {} }
+async function dbDel(id) { try { const db = await dbp; db.transaction('fonts', 'readwrite').objectStore('fonts').delete(id); } catch {} }
+function saveActive() { try { localStorage.setItem('activeFont', S.active || ''); } catch {} }
+
+async function registerFont(rec) {
+  const family = 'F_' + rec.id;
+  const ff = new FontFace(family, rec.data);
+  await ff.load(); document.fonts.add(ff);
+  S.fonts.push({ ...rec, family });
+}
+
+async function importFiles(files) {
+  for (const f of files) {
+    if (!/\.(ttf|otf|woff2?)$/i.test(f.name)) continue;
+    const rec = { id: Date.now() + '_' + Math.random().toString(36).slice(2, 7), name: f.name.replace(/\.[^.]+$/, ''), data: await f.arrayBuffer(), t: Date.now() };
+    try { await registerFont(rec); dbPut(rec); S.active = rec.id; }
+    catch (e) { alert('字体加载失败：' + f.name); }
+  }
+  saveActive(); renderList(); render();
+}
+
+function renderList() {
+  const ul = $('fontList'); ul.innerHTML = '';
+  $('noFont').style.display = S.fonts.length ? 'none' : '';
+  for (const f of S.fonts) {
+    const li = document.createElement('li');
+    if (f.id === S.active) li.className = 'active';
+    li.innerHTML = `<span class="name" style="font-family:'${f.family}';font-size:20px"></span>` + (f.builtin ? '<span class="tip">默认</span>' : '<button class="del" title="删除">✕</button>');
+    li.querySelector('.name').textContent = f.name;
+    if (f.builtin) { li.onclick = () => { S.active = f.id; saveActive(); renderList(); render(); }; ul.appendChild(li); continue; }
+    li.title = f.name;
+    li.onclick = () => { S.active = f.id; saveActive(); renderList(); render(); };
+    li.querySelector('.del').onclick = e => {
+      e.stopPropagation();
+      if (!confirm('删除字体 ' + f.name + '？')) return;
+      S.fonts = S.fonts.filter(x => x !== f); dbDel(f.id);
+      if (S.active === f.id) S.active = S.fonts[0]?.id || null;
+      saveActive(); renderList(); render();
+    };
+    ul.appendChild(li);
+  }
+}
+
+// ---------- 出图 ----------
+function draw(text, family) {
+  const size = +$('size').value || 120, pad = +$('pad').value || 0, color = $('color').value;
+  const font = `${size}px "${family}"`;
+  const m = document.createElement('canvas').getContext('2d');
+  m.font = font;
+  const mt = m.measureText(text);
+  const L = Math.ceil(mt.actualBoundingBoxLeft), R = Math.ceil(mt.actualBoundingBoxRight);
+  const A = Math.ceil(mt.actualBoundingBoxAscent), D = Math.ceil(mt.actualBoundingBoxDescent);
+  const tw = L + R, th = A + D;
+  const c = document.createElement('canvas');
+  let scale = 1;
+  if ($('fixed').checked) {
+    c.width = +$('fw').value || 600; c.height = +$('fh').value || 300;
+    scale = Math.min((c.width - pad * 2) / tw, (c.height - pad * 2) / th, 10);
+  } else {
+    c.width = tw + pad * 2; c.height = th + pad * 2;
+  }
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.save();
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.scale(scale, scale);
+  ctx.font = font; ctx.fillStyle = color; ctx.textBaseline = 'alphabetic';
+  ctx.fillText(text, -tw / 2 + L, -th / 2 + A);
+  ctx.restore();
+  return c;
+}
+
+function render() {
+  const out = $('out'); out.innerHTML = '';
+  const names = $('names').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const fonts = $('allFonts').checked ? S.fonts : S.fonts.filter(f => f.id === S.active);
+  if (!fonts.length) { out.innerHTML = '<div class="empty">先导入字体</div>'; return; }
+  if (!names.length) { out.innerHTML = '<div class="empty">在左边输入名字</div>'; return; }
+  for (const n of names) for (const f of fonts) {
+    const div = document.createElement('div'); div.className = 'item';
+    const c = draw(n, f.family);
+    div.appendChild(c);
+    const cap = document.createElement('div'); cap.className = 'cap';
+    cap.textContent = fonts.length > 1 ? `${n} · ${f.name}` : n;
+    div.appendChild(cap);
+    div.title = '点击复制图片';
+    div.onclick = () => copy(c, div);
+    out.appendChild(div);
+  }
+}
+
+async function copy(canvas, div) {
+  try {
+    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    document.querySelectorAll('.item.ok').forEach(x => x.classList.remove('ok'));
+    div.classList.add('ok'); setTimeout(() => div.classList.remove('ok'), 900);
+  } catch (e) { alert('复制失败：' + e.message); }
+}
+
+// ---------- 事件 ----------
+$('btnImport').onclick = () => $('fileInput').click();
+$('fileInput').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
+['names', 'size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts'].forEach(id => $(id).addEventListener('input', render));
+const drop = document.body;
+drop.addEventListener('dragover', e => { e.preventDefault(); $('drop').classList.add('drag'); });
+drop.addEventListener('dragleave', () => $('drop').classList.remove('drag'));
+drop.addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('drag'); importFiles([...e.dataTransfer.files]); });
+
+// 设置也记住
+const keys = ['size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts', 'names'];
+try { const s = JSON.parse(localStorage.getItem('settings') || '{}'); for (const k of keys) if (k in s) { const el = $(k); el.type === 'checkbox' ? el.checked = s[k] : el.value = s[k]; } } catch {}
+document.addEventListener('input', () => { try { const s = {}; for (const k of keys) { const el = $(k); s[k] = el.type === 'checkbox' ? el.checked : el.value; } localStorage.setItem('settings', JSON.stringify(s)); } catch {} });
+
+(async () => {
+  try {
+    const ff = new FontFace('F_builtin', 'url(Sacramento-Regular.ttf)');
+    await ff.load(); document.fonts.add(ff);
+    S.fonts.push({ id: 'builtin', name: 'Sacramento', family: 'F_builtin', builtin: true });
+  } catch (e) { console.warn('默认字体加载失败', e); }
+  const recs = (await dbAll()).sort((a, b) => a.t - b.t);
+  for (const r of recs) { try { await registerFont(r); } catch {} }
+  let a = null; try { a = localStorage.getItem('activeFont'); } catch {}
+  S.active = S.fonts.find(f => f.id === a) ? a : (S.fonts[0]?.id || null);
+  renderList(); render();
+})();
+</script>
+</body>
+</html>
