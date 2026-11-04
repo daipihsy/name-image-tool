@@ -66,6 +66,13 @@
     </div>
   </div>
   <div class="panel">
+    <div class="row" style="margin:0 0 12px">
+      <button class="primary" id="btnCopyAll">一键复制全部</button>
+      粘贴到表格的图片高度 <input type="number" id="pasteH" value="80" min="10" max="600"> px
+      <label><input type="checkbox" id="withName"> 左边带一列名字</label>
+      <span class="tip" id="copyAllMsg"></span>
+    </div>
+    <div class="tip" style="margin:-4px 0 12px" id="excelTip"></div>
     <div class="grid" id="out"></div>
   </div>
 </main>
@@ -159,7 +166,7 @@ function render() {
   if (!fonts.length) { out.innerHTML = '<div class="empty">先导入字体</div>'; return; }
   if (!names.length) { out.innerHTML = '<div class="empty">在左边输入名字</div>'; return; }
   for (const n of names) for (const f of fonts) {
-    const div = document.createElement('div'); div.className = 'item';
+    const div = document.createElement('div'); div.className = 'item'; div.dataset.name = n;
     const c = draw(n, f.family);
     div.appendChild(c);
     const cap = document.createElement('div'); cap.className = 'cap';
@@ -180,6 +187,35 @@ async function copy(canvas, div) {
   } catch (e) { alert('复制失败：' + e.message); }
 }
 
+// ---------- 一键复制全部：HTML 表格，每行一张图 ----------
+function copyAll() {
+  const items = [...document.querySelectorAll('#out .item')];
+  if (!items.length) return;
+  const h = +$('pasteH').value || 80, withName = $('withName').checked;
+  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let rows = '';
+  for (const it of items) {
+    const c = it.querySelector('canvas'), w = Math.round(h * c.width / c.height);
+    const name = it.dataset.name;
+    rows += `<tr style="height:${Math.round(h * 0.75) + 6}pt">` + (withName ? `<td>${esc(name)}</td>` : '') +
+      `<td><img src="${c.toDataURL('image/png')}" width="${w}" height="${h}"></td></tr>`;
+  }
+  const html = `<table>${rows}</table>`;
+  const text = items.map(it => it.dataset.name).join('\r\n');
+  const onCopy = e => { e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', text); e.preventDefault(); };
+  document.addEventListener('copy', onCopy);
+  const ok = document.execCommand('copy');
+  document.removeEventListener('copy', onCopy);
+  $('copyAllMsg').textContent = ok ? `已复制 ${items.length} 张，到表格里 Ctrl+V` : '复制失败';
+  setTimeout(() => $('copyAllMsg').textContent = '', 4000);
+}
+$('btnCopyAll').onclick = copyAll;
+function updateTip() {
+  const rh = Math.ceil((+$('pasteH').value || 80) * 0.75) + 2;
+  $('excelTip').textContent = `WPS 粘贴直接一行一张。Excel 要先把那几行的行高调到 ${rh} 以上，否则图片会隔几行一张、跟名字对不上。`;
+}
+$('pasteH').addEventListener('input', updateTip);
+
 // ---------- 事件 ----------
 $('btnImport').onclick = () => $('fileInput').click();
 $('fileInput').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
@@ -190,8 +226,9 @@ drop.addEventListener('dragleave', () => $('drop').classList.remove('drag'));
 drop.addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('drag'); importFiles([...e.dataTransfer.files]); });
 
 // 设置也记住
-const keys = ['size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts', 'names'];
+const keys = ['size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts', 'names', 'pasteH', 'withName'];
 try { const s = JSON.parse(localStorage.getItem('settings') || '{}'); for (const k of keys) if (k in s) { const el = $(k); el.type === 'checkbox' ? el.checked = s[k] : el.value = s[k]; } } catch {}
+updateTip();
 document.addEventListener('input', () => { try { const s = {}; for (const k of keys) { const el = $(k); s[k] = el.type === 'checkbox' ? el.checked : el.value; } localStorage.setItem('settings', JSON.stringify(s)); } catch {} });
 
 (async () => {
