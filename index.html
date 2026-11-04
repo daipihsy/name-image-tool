@@ -83,7 +83,7 @@
     <div class="row" style="margin:0 0 12px">
       <button class="primary" id="btnCopyAll">一键复制全部</button>
       粘贴到表格的图片高度 <input type="number" id="pasteH" value="80" min="10" max="600"> px
-      <label><input type="checkbox" id="withName"> 左边带一列名字</label>
+      <label><input type="checkbox" id="withName"> <span id="withNameText">左边带一列名字</span></label>
       <span class="tip" id="copyAllMsg"></span>
     </div>
     <div class="tip" style="margin:-4px 0 12px" id="excelTip"></div>
@@ -246,6 +246,7 @@ function render() {
   const out = $('out'); out.innerHTML = '';
   const orderMode = $('mode').value === 'order';
   document.body.className = orderMode ? 'm-order' : 'm-plain';
+  $('withNameText').textContent = orderMode ? '左边带订单号、名字两列' : '左边带一列名字';
   $('namesTitle').textContent = orderMode ? '名字' : '名字（一行一个）';
   $('names').placeholder = '例：Kennedy';
   const jobs = parseJobs();
@@ -253,7 +254,7 @@ function render() {
   if (!fonts.length) { out.innerHTML = '<div class="empty">先导入字体</div>'; return; }
   if (!jobs.length) { out.innerHTML = `<div class="empty">在左边输入${orderMode ? '订单号和名字' : '名字'}</div>`; return; }
   for (const j of jobs) for (const f of fonts) {
-    const div = document.createElement('div'); div.className = 'item'; div.dataset.name = j.key;
+    const div = document.createElement('div'); div.className = 'item'; div.dataset.name = j.name; div.dataset.order = j.order || '';
     const c = orderMode ? drawOrder(j.order, j.label, j.name, f.family) : draw(j.name, f.family);
     div.appendChild(c);
     const cap = document.createElement('div'); cap.className = 'cap';
@@ -283,12 +284,14 @@ function copyAll() {
   let rows = '';
   for (const it of items) {
     const c = it.querySelector('canvas'), w = Math.round(h * c.width / c.height);
-    const name = it.dataset.name;
-    rows += `<tr style="height:${Math.round(h * 0.75) + 6}pt">` + (withName ? `<td>${esc(name)}</td>` : '') +
+    const name = it.dataset.name, order = it.dataset.order;
+    const cols = !withName ? '' :
+      (order ? `<td style="mso-number-format:'\\@'">${esc(order)}</td>` : '') + `<td>${esc(name)}</td>`;
+    rows += `<tr style="height:${Math.round(h * 0.75) + 6}pt">` + cols +
       `<td><img src="${c.toDataURL('image/png')}" width="${w}" height="${h}"></td></tr>`;
   }
   const html = `<table>${rows}</table>`;
-  const text = items.map(it => it.dataset.name).join('\r\n');
+  const text = items.map(it => (it.dataset.order ? it.dataset.order + '\t' : '') + it.dataset.name).join('\r\n');
   const onCopy = e => { e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', text); e.preventDefault(); };
   document.addEventListener('copy', onCopy);
   const ok = document.execCommand('copy');
