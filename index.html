@@ -34,6 +34,7 @@
   .empty { color:var(--muted); padding:30px; }
   .tip { font-size:12px; color:var(--muted); }
   #drop.drag { outline:2px dashed var(--accent); }
+  body.m-plain .orderOnly, body.m-order .plainOnly { display:none !important; }
 </style>
 </head>
 <body>
@@ -52,16 +53,23 @@
       <div class="empty" id="noFont" style="padding:10px">默认字体加载中…</div>
     </div>
     <div class="panel" style="margin-top:16px">
-      <h2>名字（一行一个）</h2>
-      <textarea id="names" placeholder="在这里输入名字，一行一个"></textarea>
-      <div class="row">
+      <div class="row" style="margin-top:0">
+        模式 <select id="mode">
+          <option value="plain">只出名字</option>
+          <option value="order">订单号 + 名字（4:3 带二维码）</option>
+        </select>
+      </div>
+      <h2 id="namesTitle">名字（一行一个）</h2>
+      <textarea id="names"></textarea>
+      <div class="tip orderOnly">每行：订单号 名字（中间空格或 Tab 隔开，可直接从表格复制两列粘进来）。同一订单号多行会自动编号 _1/N、_2/N…，二维码里只有订单号。</div>
+      <div class="row plainOnly">
         字号 <input type="number" id="size" value="120" min="20" max="600">
         留白 <input type="number" id="pad" value="40" min="0" max="400">
       </div>
       <div class="row">
         文字色 <input type="color" id="color" value="#222222">
-        <label><input type="checkbox" id="fixed"> 固定画布</label>
-        <input type="number" id="fw" value="600" min="50"> × <input type="number" id="fh" value="300" min="50">
+        <span class="plainOnly"><label><input type="checkbox" id="fixed"> 固定画布</label>
+        <input type="number" id="fw" value="600" min="50"> × <input type="number" id="fh" value="300" min="50"></span>
       </div>
     </div>
   </div>
@@ -76,6 +84,7 @@
     <div class="grid" id="out"></div>
   </div>
 </main>
+<script src="qrcode.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const S = { fonts: [], active: null };   // fonts: {id, name, family, data}
@@ -159,18 +168,88 @@ function draw(text, family) {
   return c;
 }
 
+// ---------- 订单模式：4:3 横图，右上二维码 + 订单编号 + 名字 ----------
+const LABEL_FONT = '"Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif';
+function wrapLines(ctx, text, maxW) {
+  const lines = []; let cur = '';
+  for (const ch of text) {
+    if (ctx.measureText(cur + ch).width > maxW && cur) { lines.push(cur); cur = ch.trim() ? ch : ''; }
+    else cur += ch;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+function drawOrder(order, label, name, family) {
+  const W = 1200, H = 900, pad = 40, color = $('color').value;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+
+  // 二维码：只含订单号
+  const qr = qrcode(0, 'M'); qr.addData(order); qr.make();
+  const n = qr.getModuleCount(), cell = Math.floor(280 / n), qs = cell * n;
+  const blockW = 340, blockX = W - pad - blockW;
+  const qx = blockX + Math.round((blockW - qs) / 2), qy = pad + 10;
+  ctx.fillStyle = '#000';
+  for (let r = 0; r < n; r++) for (let col = 0; col < n; col++)
+    if (qr.isDark(r, col)) ctx.fillRect(qx + col * cell, qy + r * cell, cell, cell);
+
+  // 二维码下面：订单编号（粗）+ 名字
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = '#000';
+  let y = qy + qs + 18;
+  let fs = 40; ctx.font = `bold ${fs}px ${LABEL_FONT}`;
+  while (ctx.measureText(label).width > blockW && fs > 20) { fs--; ctx.font = `bold ${fs}px ${LABEL_FONT}`; }
+  ctx.fillText(label, blockX + blockW / 2, y); y += fs + 12;
+  ctx.font = `bold 34px ${LABEL_FONT}`;
+  for (const ln of wrapLines(ctx, name, blockW).slice(0, 4)) { ctx.fillText(ln, blockX + blockW / 2, y); y += 44; }
+
+  // 左边大字名字：自动缩放填满区域
+  const ax = pad, ay = pad, aw = blockX - 40 - pad, ah = H - pad * 2;
+  ctx.font = `100px "${family}"`; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const mt = ctx.measureText(name);
+  const L = mt.actualBoundingBoxLeft, R = mt.actualBoundingBoxRight, A = mt.actualBoundingBoxAscent, D = mt.actualBoundingBoxDescent;
+  const s = Math.min(aw / (L + R), ah / (A + D), 3.2);
+  const fsz = 100 * s;
+  ctx.font = `${fsz}px "${family}"`; ctx.fillStyle = color; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const tw = (L + R) * s, th = (A + D) * s;
+  ctx.fillText(name, ax + (aw - tw) / 2 + L * s, ay + (ah - th) / 2 + A * s);
+  return c;
+}
+
+function parseJobs() {
+  const lines = $('names').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  if ($('mode').value !== 'order') return lines.map(n => ({ name: n, key: n, cap: n }));
+  const rows = [];
+  for (const ln of lines) {
+    const m = ln.includes('\t') ? ln.split('\t') : ln.split(/[\s,，]+/);
+    const order = m[0].trim(), name = m.slice(1).join(ln.includes('\t') ? ' ' : ' ').trim();
+    if (order && name) rows.push({ order, name });
+  }
+  const total = {}, idx = {};
+  for (const r of rows) total[r.order] = (total[r.order] || 0) + 1;
+  return rows.map(r => {
+    idx[r.order] = (idx[r.order] || 0) + 1;
+    const label = `${r.order}_${idx[r.order]}/${total[r.order]}`;
+    return { ...r, label, key: `${label} ${r.name}`, cap: `${label}  ${r.name}` };
+  });
+}
+
 function render() {
   const out = $('out'); out.innerHTML = '';
-  const names = $('names').value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const orderMode = $('mode').value === 'order';
+  document.body.className = orderMode ? 'm-order' : 'm-plain';
+  $('namesTitle').textContent = orderMode ? '订单号 + 名字（一行一个）' : '名字（一行一个）';
+  $('names').placeholder = orderMode ? '4072413427 Kennedy\n4072413427 Sophia\n4072419999 Annie' : '在这里输入名字，一行一个';
+  const jobs = parseJobs();
   const fonts = $('allFonts').checked ? S.fonts : S.fonts.filter(f => f.id === S.active);
   if (!fonts.length) { out.innerHTML = '<div class="empty">先导入字体</div>'; return; }
-  if (!names.length) { out.innerHTML = '<div class="empty">在左边输入名字</div>'; return; }
-  for (const n of names) for (const f of fonts) {
-    const div = document.createElement('div'); div.className = 'item'; div.dataset.name = n;
-    const c = draw(n, f.family);
+  if (!jobs.length) { out.innerHTML = `<div class="empty">在左边输入${orderMode ? '订单号和名字' : '名字'}</div>`; return; }
+  for (const j of jobs) for (const f of fonts) {
+    const div = document.createElement('div'); div.className = 'item'; div.dataset.name = j.key;
+    const c = orderMode ? drawOrder(j.order, j.label, j.name, f.family) : draw(j.name, f.family);
     div.appendChild(c);
     const cap = document.createElement('div'); cap.className = 'cap';
-    cap.textContent = fonts.length > 1 ? `${n} · ${f.name}` : n;
+    cap.textContent = fonts.length > 1 ? `${j.cap} · ${f.name}` : j.cap;
     div.appendChild(cap);
     div.title = '点击复制图片';
     div.onclick = () => copy(c, div);
@@ -219,14 +298,14 @@ $('pasteH').addEventListener('input', updateTip);
 // ---------- 事件 ----------
 $('btnImport').onclick = () => $('fileInput').click();
 $('fileInput').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
-['names', 'size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts'].forEach(id => $(id).addEventListener('input', render));
+['names', 'size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts', 'mode'].forEach(id => $(id).addEventListener('input', render));
 const drop = document.body;
 drop.addEventListener('dragover', e => { e.preventDefault(); $('drop').classList.add('drag'); });
 drop.addEventListener('dragleave', () => $('drop').classList.remove('drag'));
 drop.addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('drag'); importFiles([...e.dataTransfer.files]); });
 
 // 设置也记住
-const keys = ['size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts', 'names', 'pasteH', 'withName'];
+const keys = ['size', 'pad', 'color', 'fixed', 'fw', 'fh', 'allFonts', 'names', 'pasteH', 'withName', 'mode'];
 try { const s = JSON.parse(localStorage.getItem('settings') || '{}'); for (const k of keys) if (k in s) { const el = $(k); el.type === 'checkbox' ? el.checked = s[k] : el.value = s[k]; } } catch {}
 updateTip();
 document.addEventListener('input', () => { try { const s = {}; for (const k of keys) { const el = $(k); s[k] = el.type === 'checkbox' ? el.checked : el.value; } localStorage.setItem('settings', JSON.stringify(s)); } catch {} });
